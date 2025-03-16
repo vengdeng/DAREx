@@ -18,7 +18,7 @@ from utils.customized_trainers import CustomizedTrainer
 from utils.load_config import cache_dir
 from utils.analyticalq import *
 from utils.deltaprune import *
-from DAREx.utils.outputchange import *
+from utils.outputchange import *
 import copy
 import numpy as np
 import random
