@@ -18,6 +18,7 @@ from utils.customized_trainers import CustomizedTrainer
 from utils.load_config import cache_dir
 from utils.analyticalq import *
 from utils.deltaprune import *
+from DAREx.utils.outputchange import *
 import copy
 import numpy as np
 import random
@@ -36,39 +37,69 @@ def set_seed(seed: int = 0) -> None:
     os.environ["PYTHONHASHSEED"] = str(seed)
     print(f"Random seed set as {seed}")
 set_seed()
+def remove_one_outlier(data):
+    # Calculate the mean and standard deviation
+    mean = np.mean(data)
+    # std_dev = np.std(data)
+    # Find the outlier (the data point farthest from the mean)
+    outlier = max(data, key=lambda x: abs(x - mean))
+    # Remove the outlier
+    data.remove(outlier)
+    
+    return data
 
 def objective_func(inputs,param,args):
+    
     drop_dict = inputs['drop_dict']
     pretrained_model = inputs['pretrained_model']
-    if args.analytical:
-        q_dict_e = optimal_q_calculation(inputs['metric_score'],inputs['delta_param'],param,p=1-inputs['p'],gpu=args.device)
-        delta_2 = rescale_q(pretrained_model,drop_dict,q_dict_e)
-    else:
-        delta_2 = rescale_v(pretrained_model,drop_dict,param)
-        
-    finetuned_model_2 = inputs['finetuned_model_2']
-    finetuned_model_2.load_state_dict(delta_2)
-    dataset_name = inputs['dataset_name']
-    trainer = CustomizedTrainer(
-            model=finetuned_model_2,              # model
-            args=inputs['training_args'],                 # training arguments
-            train_dataset=inputs['train_dataset'],        # training dataset
-            eval_dataset=inputs['val_dataset'],          # evaluation dataset
-            compute_metrics=partial(compute_metrics, dataset_names=[dataset_name]),   # function for computing metrics
-            tokenizer=inputs['tokenizer']                 # tokenizer
-        )
-    test_metrics = trainer.evaluate()
-    test_metrics = {k: float(f"{v:.4f}") if isinstance(v, float) else v for k, v in test_metrics.items()}
-    pef = extract_res(test_metrics,dataset_name)
-    print('the performance of param {} is {}'.format(param,pef))
-    return pef
+    perf_list = []
+    
+    seed_list = [0,1,2,3] if args.outputchange else [0]
+
+    for seed in seed_list:
+        print(seed)
+        if seed != 0:
+            torch.manual_seed(seed)
+            ### you can also save the drop in advance to save time 
+            drop_dict = drop(inputs['delta_param_or'],1-inputs['p'])
+        if args.analytical:
+            q_dict_e = optimal_q_calculation(inputs['metric_score'],inputs['delta_param'],param,p=1-inputs['p'],gpu=args.device)
+            delta_2 = rescale_q(pretrained_model,drop_dict,q_dict_e)
+        else:
+            delta_2 = rescale_v(pretrained_model,drop_dict,param)
+            
+        finetuned_model_2 = inputs['finetuned_model_2']
+        finetuned_model_2.load_state_dict(delta_2)
+        dataset_name = inputs['dataset_name']
+        if args.outputchange:
+            inputs['pruned_model'] = finetuned_model_2
+            pef = -get_outpuchage(inputs,args)
+        else:
+            trainer = CustomizedTrainer(
+                    model=finetuned_model_2,              # model
+                    args=inputs['training_args'],                 # training arguments
+                    train_dataset=inputs['train_dataset'],        # training dataset
+                    eval_dataset=inputs['val_dataset'],          # evaluation dataset
+                    compute_metrics=partial(compute_metrics, dataset_names=[dataset_name]),   # function for computing metrics
+                    tokenizer=inputs['tokenizer']                 # tokenizer
+                )
+            test_metrics = trainer.evaluate()
+            test_metrics = {k: float(f"{v:.4f}") if isinstance(v, float) else v for k, v in test_metrics.items()}
+            pef = extract_res(test_metrics,dataset_name)
+            
+        perf_list.append(pef)
+    if len(perf_list) >= 3:
+        print(perf_list)
+        perf_list = remove_one_outlier(perf_list)
+    print('the performance of param {} is {}'.format(param,np.mean(perf_list)))
+    return np.mean(perf_list)
 
 def find_optimal_param(inputs,l_bound,u_bound,step=0.1,decay=0.1):
     """
     step: step size in find the optimal q
     decay: 0-1, the decay rate for more accurate finding q, you can increase it if you need a faster finding.
     """
-    best_score = 0
+    best_score =  -np.inf
     best_scores = {}
     stop_id = 0
     for initial in  np.arange(l_bound, u_bound+step, step):
@@ -83,10 +114,10 @@ def find_optimal_param(inputs,l_bound,u_bound,step=0.1,decay=0.1):
             break
         
     sorted_slots = sorted(best_scores.items(), key=lambda x: x[1], reverse=True)
-    l_bound = sorted_slots[0][0] - step*(1-decay)
+    l_bound = max(l_bound+step*decay,sorted_slots[0][0] - step*(1-decay))
     u_bound = sorted_slots[0][0] + step
 
-    best_score = 0
+    best_score = -np.inf
     stop_id = 0
     for initial in np.arange(l_bound, u_bound, step*decay):
         score = objective_func(inputs,initial,args)
@@ -122,6 +153,7 @@ if __name__ == "__main__":
         parser.add_argument('--finetuned_model', type=str, default=None, help='the finetuned model to use')
         parser.add_argument('--analytical', action='store_true', help='use analytical resolve q')
         parser.add_argument('--param', type=float, default=None, help='the optimal parameter')
+        parser.add_argument('--outputchange', action='store_true', help='use output change for finding q')
         args = parser.parse_args()
         return args
     args = get_args()
@@ -153,18 +185,57 @@ if __name__ == "__main__":
     pretrained_model = AutoModelForSequenceClassification.from_pretrained(pretrained_model_name_or_path=architect, cache_dir=cache_dir,
                                                                         num_labels=num_labels,output_hidden_states=False)
     
+
     finetuned_model_2 =  AutoModelForSequenceClassification.from_pretrained(pretrained_model_name_or_path=training_args.output_dir,
-                                                                     num_labels=num_labels,output_hidden_states=False)
+                                                                     num_labels=num_labels,output_hidden_states= False)
     
     finetuned_model_2.to(args.device)
     delta_param = cal_delta_param(finetuned_model,pretrained_model)
     delta_param_or = delta_param
+
     drop_dict = drop(delta_param_or,1-p)
     inputs = {}
     ### find optimal param
     if args.analytical:
         dataloader,_ = get_loaders("wikitext2",tokenizer= tokenizer,seqlen=128,nsamples = 50)
         metric_score = get_wx(finetuned_model.to(args.device),dataloader,delta_param_or)
+    if args.outputchange:
+        #### change the dataset to what you want #####
+        inputs['delta_param_or'] = delta_param_or
+        # dataset = load_dataset('glue', dataset_name, split='train')
+        # try:
+        #     trainenc = tokenizer(" ".join(dataset['sentence']), return_tensors='pt')
+        # except:
+        #     trainenc = tokenizer(" ".join(dataset['sentence1']), return_tensors='pt')
+        ##### creat data #####
+        # random.seed(0)
+        # trainloader = []
+        # for _ in range(nsamples):
+        #     i = random.randint(0, trainenc.input_ids.shape[1] - seqlen - 1)
+        #     j = i + seqlen
+        #     inp = trainenc.input_ids[:, i:j]
+        #     tar = inp.clone()
+        #     tar[:, :-1] = -100
+        #     trainloader.append(inp)
+        trainenc = get_output_data(dataset_name,tokenizer)
+        seqlen = 128
+        nsamples = 50
+        dataloader = output_loader(seqlen,nsamples,trainenc)
+        with torch.no_grad():
+            finetuned_model.eval()
+            ##### finetuned_model.roberta for roberta model
+            if 'roberta' in args.architect:
+                last_layer_mean_o = finetuned_model.roberta(torch.cat(dataloader).to(finetuned_model.device)).last_hidden_state
+                last_layer_mean_o = finetuned_model.classifier.dense(last_layer_mean_o)
+            elif 'bert' in args.architect:
+                last_layer_mean_o = finetuned_model.bert(torch.cat(dataloader).to(finetuned_model.device)).last_hidden_state
+            else:
+                print('add your own last_hidden_state code ')
+                assert 1 == 2
+            # last_layer_mean_o =output[1][-1]
+        inputs['last_layer_mean_o'] = last_layer_mean_o.to(args.device)
+        inputs['dataloader'] = dataloader
+
     if args.param is None:
         if args.analytical:
             inputs['metric_score'] = metric_score
@@ -178,7 +249,6 @@ if __name__ == "__main__":
         inputs['pretrained_model'] = pretrained_model
         inputs['delta_param'] = delta_param
         inputs['p'] = p
-
         param = find_optimal_param(inputs,args.l_bound,args.u_bound,step=args.step_size)
     else:
         param = args.param

@@ -34,11 +34,13 @@ def analytical_resolve_new(p,c,eta= 0.45,prob=0.95,stop_iter= 0.8):
     return q_o
 
 
-def optimal_q_calculation(metric_score,delta_param,eta,p=0.99,gpu='cuda:2'):
+def optimal_q_calculation(metric_score,delta_param,eta,p=0.99,gpu='cuda:2',stop_iter = 0.8):
     q_dict_e = {}
     q_dict_or = {}
     for name in delta_param.keys():
         ### skip parameters that don't take inputs and paraneters won't been pruned
+        if 'lm_head' in name:
+            continue
         if 'classifier' in name:
             continue
         if 'bias'  in name:
@@ -55,7 +57,7 @@ def optimal_q_calculation(metric_score,delta_param,eta,p=0.99,gpu='cuda:2'):
                 c_b = delta_param[name_b].unsqueeze(1).to(torch.float16)
                 c = torch.cat([c,c_b],dim=1)
             c = c.to(gpu)
-        best_2 = analytical_resolve_new(p,c,eta=eta)
-        q_dict_or[name] = best_2
-        q_dict_e[name] = best_2.mean()
+            best_2 = analytical_resolve_new(p,c,eta=eta,stop_iter=stop_iter)
+            q_dict_or[name] = best_2
+            q_dict_e[name] = best_2.mean()
     return q_dict_e

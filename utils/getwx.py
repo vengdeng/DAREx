@@ -126,3 +126,84 @@ def get_wx(finetuned_model,inputs,delta_param_or):
         metric_score[name+'.weight'] = copy.deepcopy(W_metric)
 
     return metric_score
+
+def prepare_calibration_input(model, dataloader,seqlen,num_sample, device):
+    use_cache = model.config.use_cache
+    model.config.use_cache = False
+    layers = model.model.layers
+
+    # dev = model.hf_device_map["model.embed_tokens"]
+    # if "model.embed_tokens" in model.hf_device_map:
+    #     device = model.hf_device_map["model.embed_tokens"]
+
+    dtype = next(iter(model.parameters())).dtype
+    inps = torch.zeros((num_sample, seqlen, model.config.hidden_size), dtype=dtype, device=device)
+    inps.requires_grad = False
+    cache = {'i': 0, 'attention_mask': None, "position_ids": None}
+
+    class Catcher(nn.Module):
+        def __init__(self, module):
+            super().__init__()
+            self.module = module
+        def forward(self, inp, **kwargs):
+            inps[cache['i']] = inp
+            cache['i'] += 1
+            cache['attention_mask'] = kwargs['attention_mask']
+            cache['position_ids'] = kwargs['position_ids']
+            raise ValueError
+    layers[0] = Catcher(layers[0])
+    for batch in dataloader:
+        try:
+            model(batch[0].to(device))
+        except ValueError:
+            pass 
+    layers[0] = layers[0].module
+
+    outs = torch.zeros_like(inps)
+    attention_mask = cache['attention_mask']
+    position_ids = cache['position_ids']
+    model.config.use_cache = use_cache
+
+    return inps, outs, attention_mask, position_ids 
+
+def get_wx_decoder(f_model,inputs,tuned_delta,nsamples,seqlen):
+    with torch.no_grad():
+        inps, outs, attention_mask, position_ids = prepare_calibration_input(f_model, inputs,seqlen,nsamples, f_model.device)
+    layers = f_model.model.layers
+    layer_rap = {}
+    metric_score = {}
+    for i in range(len(layers)):
+        layer = layers[i]
+        subset = find_layers(layer)
+
+        # if f"model.layers.{i}" in model.hf_device_map:   ## handle the case for llama-30B and llama-65B, when the device map has multiple GPUs;
+        #     dev = model.hf_device_map[f"model.layers.{i}"]
+        # inps, outs, attention_mask, position_ids = inps.to(dev), outs.to(dev), attention_mask.to(dev), position_ids.to(dev)
+
+        wrapped_layers = {}
+        for name in subset:
+            wrapped_layers[name] = WrappedGPT(subset[name])
+
+        def add_batch(name):
+            def tmp(_, inp, out):
+                wrapped_layers[name].add_batch(inp[0].data, out.data)
+            return tmp
+
+        handles = []
+        for name in wrapped_layers:
+            handles.append(subset[name].register_forward_hook(add_batch(name)))
+        for j in range(nsamples):
+            with torch.no_grad():
+                _ = layer(inps[j].unsqueeze(0).to(f_model.device), attention_mask=attention_mask, position_ids=position_ids)
+                outs[j] = layer(inps[j].unsqueeze(0).to(f_model.device), attention_mask=attention_mask, position_ids=position_ids)[0]
+        for h in handles:
+            h.remove()
+        for name in subset:
+            # print(f"pruning layer {i} name {name}")
+            # f_W_metric = f_model.state_dict()['model.layers.'+str(i)+ '.'+name+'.weight'].detach().cpu() * wrapped_layers[name].scaler_row.reshape((1,-1)).detach().cpu()
+            W_metric = tuned_delta['model.layers.'+str(i)+ '.'+name+'.weight'] * wrapped_layers[name].scaler_row.reshape((1,-1)).detach().cpu()
+            metric_score['model.layers.'+str(i)+ '.'+name+'.weight'] = copy.deepcopy(W_metric)
+        inps, outs = outs, inps
+        layer_rap[i] = copy.deepcopy(wrapped_layers)
+        
+    return metric_score
