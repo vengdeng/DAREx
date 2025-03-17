@@ -54,8 +54,19 @@ python find_q_encoder.py --l_bound 0.01 --u_bound 0.1 --step_size 0.05  --device
 
 ## Find q for decoder model
 
-We have conducted an speedup version of finding q for decoder model by leveraging bf16 and flash attention. Additionally, we provide a per-layer optimization strategy for usage.
+We have conducted an speedup version of finding q for decoder model by leveraging bf16 and flash attention. As state in our paper, we recommend to find global q for decoder models. Additionally, we provide a per-layer optimization strategy for usage.
 
+For decoder model, we provide an example with 🤗 <a href="https://huggingface.co/GAIR/GAIRMath-Abel-7b" target="_blank"> Abel-7B-001 </a>. 
+
+```
+find_q_decoder.py --l_bound 0.01 --u_bound 0.1 --step_size 0.05 --p 0.01  --device cuda:2 --finetuned_model GAIR/Abel-7B-001 
+```
+
+We also provide a optimization-based strategy to find per-layer q, this is an initial version, you need to pay attention to the early stop. Here is an example with Meta-Math fintuned Qwen-05B [link](https://drive.google.com/drive/folders/1TOeZ3fuW78eqZKWs3ePUY0R5xXbWmO-X?usp=drive_link)
+
+```
+python perlayer_opt.py
+```
 
 ## 📜 Citation
 
