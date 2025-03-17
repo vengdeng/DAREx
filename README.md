@@ -1,4 +1,4 @@
-# Revisiting-Delta-Parameter-Pruning-For-Fine-Tuned-Models
+# DARE the Extreme: Revisiting Delta-Parameter Pruning For Fine-Tuned Models
 
 [![Conference](https://img.shields.io/badge/ICLR-2025-blue.svg)](https://iclr.cc/)
 [![Python](https://img.shields.io/badge/Python-3.8%2B-green.svg)](https://www.python.org/)
@@ -6,7 +6,7 @@
 
 📌 **Official repository for our ICLR 2025 Spotlight paper:**
 
-> **Revisiting-Delta-Parameter-Pruning-For-Fine-Tuned-Models**  
+> **DARE the Extreme: Revisiting Delta-Parameter Pruning For Fine-Tuned Models**  
 > * [Wenlong Deng](https://vengdeng.github.io/), Yize Zhao,  Vala Vakilian, [Minghui Chen](https://chenminghui.com), [Xiaoxiao Li](https://tea.ece.ubc.ca/), [Christos Thrampoulidi](https://sites.google.com/view/cthrampo)*  
 > 📄 [[Arxiv](https://arxiv.org/abs/2410.09344)]  
 
