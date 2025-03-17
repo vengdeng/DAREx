@@ -28,7 +28,6 @@ selecting the most appropriate DPP method under various practical scenarios
 
 For encoder model, we share the fintuned models in [link](https://drive.google.com/drive/folders/1A3YkK1iGoj2DyvJ7LhufV2fbaV4g70Rc?usp=sharing)
 
-#### find q encoder analytically
 ```
 python find_q_encoder.py --l_bound 0.1 --u_bound 0.5 --step_size 0.1  --device cuda:1 --analytical  --finetuned_model cola model  --dataset_name cola  --param 0.37
 
@@ -39,6 +38,19 @@ python find_q_encoder.py --l_bound 0.3 --u_bound 0.7 --step_size 0.1  --device c
 python find_q_encoder.py --l_bound 0.3 --u_bound 0.7 --step_size 0.1  --device cuda:1 --analytical  --finetuned_model stsb model  --dataset_name stsb --param 0.36
 
 ```
+
+(1) Remove the --param if you want to find your own
+
+(2) Remove --analytical if you want to find global q, and set the l_bound=1-p(pruning rate) and u_bound <= 1.0
+
+(3) add --outputchange if you want to unsupervised way
+
+here is an example:
+
+```
+python find_q_encoder.py --l_bound 0.01 --u_bound 0.1 --step_size 0.05  --device cuda:1   --finetuned_model mrpc model  --dataset_name mrpc -
+```
+
 
 ## Find q for decoder model
 
