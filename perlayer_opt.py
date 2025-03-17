@@ -37,7 +37,7 @@ def parse_args():
     parser.add_argument(
         "--finetuned_model",
         type=str,
-        default="qwen05b_model_baseline_nospeed/checkpoint-5000/",
+        default="metamathqwen05",
         help="Path to the finetuned model checkpoint."
     )
     parser.add_argument(
